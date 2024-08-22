@@ -19,16 +19,29 @@ import org.json.JSONObject;
 
 public class App {
     public static void main(String[] args) throws IOException, InterruptedException {
-        String dataUrl = "http://10.83.46.213/admin/tenants";
-        String data = readDataFromServer(dataUrl);
+        String dataUrl_ch2 = "http://10.83.46.213/admin/tenants";
+        String dataUrl_hyd = "http://10.24.42.116/admin/tenants";
 
-        String[] tenants = extractTenantId(data);
+        String data_ch2 = readDataFromServer(dataUrl_ch2);
+        String data_hyd = readDataFromServer(dataUrl_hyd);
 
-        for (String tenant : tenants) {
-            String jsonResponse = accessUrlWithTenantId(tenant.replace("\"", ""));
-            storeIntoDatabase(jsonResponse);
+        String[] tenants_ch2 = extractTenantId(data_ch2);
+        String[] tenants_hyd = extractTenantId(data_hyd);
+
+        String ip_ch2 = "10.83.46.213";
+        String ip_hyd = "10.24.42.116";
+
+        for (String tenant : tenants_ch2) {
+            String jsonResponse = accessUrlWithTenantId(tenant.replace("\"", ""), ip_ch2);
+            storeIntoDatabase(jsonResponse, tenant, "ch2");
+        }
+
+        for (String tenant : tenants_hyd) {
+            String jsonResponse = accessUrlWithTenantId(tenant.replace("\"", ""), ip_hyd);
+            storeIntoDatabase(jsonResponse, tenant, "hyd");
         }
     }
+
 
     public static String readDataFromServer(String url) throws IOException, InterruptedException {
         HttpClient client = HttpClient.newHttpClient();
@@ -39,6 +52,7 @@ public class App {
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         return response.body();
     }
+
 
     public static String[] extractTenantId(String data) {
         JSONObject jsonObject = new JSONObject(data);
@@ -52,19 +66,23 @@ public class App {
         return tenants;
     }
 
-    public static String accessUrlWithTenantId(String tenantId) throws IOException, InterruptedException {
-        String urlWithNumber = "http://10.83.46.213/select/" + tenantId+ "/prometheus/api/v1/status/top_queries?topN=10&maxLifetime=1h" ;
+
+    public static String accessUrlWithTenantId(String tenantId, String ip) throws IOException, InterruptedException {
+
+        String frontUrl = "http://" + ip;
+        String urlWithTenantId = frontUrl + "/select/" + tenantId+ "/prometheus/api/v1/status/top_queries?topN=10&maxLifetime=1h" ;
 
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(urlWithNumber))
+                .uri(URI.create(urlWithTenantId))
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         return response.body();
     }
 
-    public static void storeIntoDatabase(String jsonResponse) {
+
+    public static void storeIntoDatabase(String jsonResponse, String tenant, String zone) {
 
         JSONObject jsonObject = new JSONObject(jsonResponse);
 
@@ -72,14 +90,15 @@ public class App {
         String username = "root";
         String password = "gieT6axo!@#%";
 
-        insertIntoCountTable(jsonObject, jdbcUrl, username, password);
-        insertIntoAvgDurationTable(jsonObject, jdbcUrl, username, password);
-        insertIntoSumDurationTable(jsonObject, jdbcUrl, username, password);
+        insertIntoCountTable(jsonObject, jdbcUrl, username, password, tenant, zone);
+        insertIntoAvgDurationTable(jsonObject, jdbcUrl, username, password, tenant, zone);
+        insertIntoSumDurationTable(jsonObject, jdbcUrl, username, password, tenant, zone);
     }
 
-    public static void insertIntoCountTable(JSONObject jsonObject, String jdbcUrl, String username, String password) {
+
+    public static void insertIntoCountTable(JSONObject jsonObject, String jdbcUrl, String username, String password, String tenant, String zone) {
         JSONArray topByCountArray = jsonObject.getJSONArray("topByCount");
-        String sqlCount = "INSERT INTO topByCount (query, query_time_interval, count) VALUES (?, ?, ?)";
+        String sqlCount = "INSERT INTO topByCount (query, query_time_interval, count, tenant_id, zone) VALUES (?, ?, ?, ?, ?)";
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl, username, password);
              PreparedStatement pmtCount = conn.prepareStatement(sqlCount)) {
@@ -93,6 +112,8 @@ public class App {
                 pmtCount.setString(1, query);
                 pmtCount.setInt(2, query_time_interval);
                 pmtCount.setInt(3, cnt);
+                pmtCount.setString(4, tenant);
+                pmtCount.setString(5, zone);
 
                 pmtCount.executeUpdate();
             }
@@ -103,9 +124,10 @@ public class App {
 
     }
 
-    public static void insertIntoAvgDurationTable(JSONObject jsonObject, String jdbcUrl, String username, String password) {
+
+    public static void insertIntoAvgDurationTable(JSONObject jsonObject, String jdbcUrl, String username, String password, String tenant, String zone) {
         JSONArray topByAvgDurationArray = jsonObject.getJSONArray("topByAvgDuration");
-        String sqlAvgDuration = "INSERT INTO topByAvgDuration (query, query_time_interval, avg_duration, count) VALUES (?, ?, ?, ?)";
+        String sqlAvgDuration = "INSERT INTO topByAvgDuration (query, query_time_interval, avg_duration, count, tenant_id, zone) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl, username, password);
              PreparedStatement pmtAvgDuration = conn.prepareStatement(sqlAvgDuration)){
@@ -122,6 +144,8 @@ public class App {
                 pmtAvgDuration.setInt(2, query_time_interval);
                 pmtAvgDuration.setInt(3, cnt);
                 pmtAvgDuration.setDouble(4, avgDuration);
+                pmtAvgDuration.setString(5, tenant);
+                pmtAvgDuration.setString(6, zone);
 
                 pmtAvgDuration.executeUpdate();
             }
@@ -131,9 +155,10 @@ public class App {
 
     }
 
-    public static void insertIntoSumDurationTable(JSONObject jsonObject, String jdbcUrl, String username, String password) {
+
+    public static void insertIntoSumDurationTable(JSONObject jsonObject, String jdbcUrl, String username, String password, String tenant, String zone) {
         JSONArray topBySumDurationArray = jsonObject.getJSONArray("topBySumDuration");
-        String sqlSumDuration = "INSERT INTO topBySumDuration (query, query_time_interval, sum_duration, count) VALUES (?, ?, ?, ?)";
+        String sqlSumDuration = "INSERT INTO topBySumDuration (query, query_time_interval, sum_duration, count, tenant_id, zone) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl, username, password);
              PreparedStatement pmtSumDuration = conn.prepareStatement(sqlSumDuration)){
@@ -150,6 +175,8 @@ public class App {
                 pmtSumDuration.setInt(2, query_time_interval);
                 pmtSumDuration.setInt(3, cnt);
                 pmtSumDuration.setDouble(4, sumDuration);
+                pmtSumDuration.setString(5, tenant);
+                pmtSumDuration.setString(6, zone);
 
                 pmtSumDuration.executeUpdate();
             }
